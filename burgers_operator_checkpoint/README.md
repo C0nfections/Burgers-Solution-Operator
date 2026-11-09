@@ -1,6 +1,6 @@
 # ESE 4020 Topic 12 - Burgers Solution Operator Baseline Checkpoint
 
-This is a reproducible starting point for Leo and Sudarshan's Topic 12 project.
+This is a reproducible starting point the project.
 It generates an independent-function dataset for the 1-D viscous Burgers PDE,
 validates the numerical solver, and tunes principal component regression (PCR)
 and ridge-regularized PCR on **validation data only**.
@@ -89,15 +89,6 @@ Load an NPZ file with
 5. A small, negative validation error difference is not proof that one model
    generalizes better. A negative result (PCR performs as well or better) is
    still scientifically useful.
-
-## Handoff
-
-- **Leo:** finish validating the simulator, interpret PCR/ridge-PCR learning
-  curves, and explain the finite-volume and PCA steps.
-- **Sudarshan:** train DeepONet against these same function splits and nested
-  training subsets, record validation curves and training cost.
-- **Both:** compare models fairly, freeze model selection, perform one locked
-  test evaluation later, write the paper, and create the five-minute video.
 
 The full numerical implementation is in `operator_baselines.py`, organized
 into solver, data generation, PCA regression, and plotting functions.
