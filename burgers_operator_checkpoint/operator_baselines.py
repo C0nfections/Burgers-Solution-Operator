@@ -13,7 +13,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-
+from sklearn.model_selection import KFold
 import matplotlib
 
 matplotlib.use("Agg")
@@ -402,155 +402,99 @@ def plot_example_predictions(
     plt.close(fig)
 
 
-def run_baselines() -> pd.DataFrame:
-    train_path = DATA_DIR / "train.npz"
-    val_path = DATA_DIR / "validation.npz"
-    if not train_path.exists() or not val_path.exists():
-        raise FileNotFoundError("Run 'generate' before 'baselines'")
-    # Deliberately never load data/test_locked.npz.
-    with np.load(train_path) as train, np.load(val_path) as val:
-        X_train, Y_train = train["X"].copy(), train["Y"].copy()
-        X_val, Y_val = val["X"].copy(), val["Y"].copy()
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    details, all_scans = [], None
-    sizes = (50, 100, 200, 400, 800)
-    seeds = (4020, 4021, 4022, 4023, 4024)
-    selected_for_examples = None
-    start = time.perf_counter()
-    for seed in seeds:
-        # The same nested function subsets are used for both regressors.
-        ordering = np.random.default_rng(seed).permutation(len(X_train))
-        for n in sizes:
-            subset = ordering[:n]
-            best, floor, scan = scan_models(
-                X_train[subset], Y_train[subset], X_val, Y_val
-            )
-            for name in ("PCR", "ridge-PCR"):
-                details.append({
-                    "seed": seed, "n_train": n, **best[name],
-                    "output_pca_floor_at_chosen_rank": floor[best[name]["r_output"]],
-                })
-            print(
-                f"seed {seed} n={n:3d}: PCR={best['PCR']['validation_error']:.5f}, "
-                f"ridge-PCR={best['ridge-PCR']['validation_error']:.5f}",
-                flush=True,
-            )
-            if seed == 4020 and n == 800:
-                all_scans = scan
-                selected_for_examples = (subset.copy(), best)
+def run_baselines():
+    with np.load(DATA_DIR / "train.npz") as data:
+        X_train = data["X"].copy()
+        Y_train = data["Y"].copy()
 
-    df = pd.DataFrame(details)
-    df.to_csv(RESULTS_DIR / "best_validation_models.csv", index=False)
-    summary = (
-        df.groupby(["n_train", "model"], as_index=False)
-        .agg(mean_relative_l2=("validation_error", "mean"),
-             sd_across_seeds=("validation_error", "std"),
-             min_across_seeds=("validation_error", "min"),
-             max_across_seeds=("validation_error", "max"))
+    with np.load(DATA_DIR / "validation.npz") as data:
+        X_valid = data["X"].copy()
+        Y_valid = data["Y"].copy()
+
+    # Fit every PCA using only the supplied training functions.
+    def predict(X_fit, Y_fit, X_eval, r_input, r_output):
+        pca_x = PCA(n_components=r_input, svd_solver="full")
+        pca_y = PCA(n_components=r_output, svd_solver="full")
+
+        train_x = pca_x.fit_transform(X_fit)
+        train_y = pca_y.fit_transform(Y_fit)
+
+        model = LinearRegression()
+        model.fit(train_x, train_y)
+
+        predicted_scores = model.predict(pca_x.transform(X_eval))
+        return pca_y.inverse_transform(predicted_scores)
+
+    # Tune ranks using five folds within the training set.
+    folds = list(
+        KFold(n_splits=5, shuffle=True, random_state=4020)
+        .split(X_train)
     )
-    summary.to_csv(RESULTS_DIR / "validation_summary.csv", index=False)
-    plot_learning_curve(df, X_val, Y_val)
-    if all_scans is not None:
-        pd.DataFrame(all_scans).to_csv(
-            RESULTS_DIR / "full_rank_scan_n800_seed4020.csv", index=False
-        )
-        plot_rank_sensitivity(all_scans)
-    if selected_for_examples is not None:
-        subset, chosen = selected_for_examples
-        plot_example_predictions(
-            X_train[subset], Y_train[subset], X_val, Y_val, chosen
-        )
 
-    seconds = time.perf_counter() - start
-    persistence = float(np.mean(relative_l2_per_function(X_val, Y_val)))
-    rows_800 = summary[summary["n_train"] == 800]
-    pcr = float(rows_800.loc[
-        rows_800["model"] == "PCR", "mean_relative_l2"
-    ].iloc[0])
-    ridge = float(rows_800.loc[
-        rows_800["model"] == "ridge-PCR", "mean_relative_l2"
-    ].iloc[0])
-    improvement = 100.0 * (pcr - ridge) / pcr
-    vs_persistence = 100.0 * (persistence - pcr) / persistence
-    pcr_50 = float(summary.loc[
-        (summary["n_train"] == 50) & (summary["model"] == "PCR"),
-        "mean_relative_l2",
-    ].iloc[0])
-    vs_50 = 100.0 * (pcr_50 - pcr) / pcr_50
-    rank_row = df[(df["seed"] == 4020) & (df["n_train"] == 800) &
-                  (df["model"] == "PCR")].iloc[0]
-    result_lines = []
-    for n in sizes:
-        p = summary[(summary["n_train"] == n) & (summary["model"] == "PCR")].iloc[0]
-        r = summary[
-            (summary["n_train"] == n) & (summary["model"] == "ridge-PCR")
-        ].iloc[0]
-        result_lines.append(
-            f"| {n} | {p['mean_relative_l2']:.4f} +/- "
-            f"{p['sd_across_seeds']:.4f} | {r['mean_relative_l2']:.4f} +/- "
-            f"{r['sd_across_seeds']:.4f} |"
-        )
-    result_table = "\n".join(result_lines)
-    report = f"""# Burgers solution operator: baseline checkpoint
+    results = []
+    for r_input in (2, 4, 6, 8, 10):
+        for r_output in (4, 8, 12, 16, 24, 32):
+            fold_errors = []
 
-## Scope and data
-- Governing PDE: viscous Burgers equation, periodic [0,1), viscosity 0.01, T=0.25.
-- Simulated pairs: 1200 (800 train, 200 validation, 200 locked test), 64 sensors each.
-- Training subset sizes: {list(sizes)}; repeated seeds: {list(seeds)}.
-- **Test policy:** the locked test file was never read during baseline model selection.
+            for fit_idx, eval_idx in folds:
+                predictions = predict(
+                    X_train[fit_idx],
+                    Y_train[fit_idx],
+                    X_train[eval_idx],
+                    r_input,
+                    r_output,
+                )
+                fold_errors.extend(
+                    relative_l2_per_function(
+                        predictions, Y_train[eval_idx]
+                    )
+                )
 
-## Validation findings (not final test results)
-- Persistence (predict u(x,T)=u(x,0)) relative L2 error: {persistence:.5f}.
-- At N=800, PCR mean validation relative L2 across five subsets: {pcr:.5f}.
-- At N=800, ridge-PCR mean validation relative L2: {ridge:.5f}.
-- Ridge improvement against PCR at N=800: {improvement:+.2f}% (positive favors ridge).
-- PCR improves by {vs_persistence:.1f}% over persistence at N=800.
-- PCR error decreases by {vs_50:.1f}% between N=50 and N=800.
-- For the N=800, seed-4020 PCR fit: input rank {int(rank_row['r_input'])},
-  output rank {int(rank_row['r_output'])}, and output-PCA projection floor
-  {rank_row['output_pca_floor_at_chosen_rank']:.4f} on validation.
-- Baseline analysis runtime: {seconds:.1f} seconds.
+            results.append({
+                "r_input": r_input,
+                "r_output": r_output,
+                "cv_error": float(np.mean(fold_errors)),
+            })
 
-| Training functions N | PCR mean +/- seed SD | ridge-PCR mean +/- seed SD |
-| ---: | ---: | ---: |
-{result_table}
+    best = min(results, key=lambda row: row["cv_error"])
 
-See `validation_summary.csv` for all N, means, and seed-to-seed standard
-deviations. The error bars in `figures/validation_learning_curves.png`
-show **one standard deviation across five training subsets**, not 95% CIs.
+    # Refit on all 800 training functions.
+    predictions = predict(
+        X_train, Y_train, X_valid,
+        best["r_input"], best["r_output"],
+    )
 
-## Interpretation and cautions
-- PCR and ridge-PCR are both linear mappings between learned PCA coefficients.
-- Input functions lie in a 10-dimensional Fourier subspace; therefore the
-  input PCA search is restricted to 2, 4, 6, 8, or 10 components.
-- Nonlinear Burgers evolution can generate output modes beyond those 10 inputs;
-  output rank is separately tuned among 4, 8, 12, 16, 24, and 32 components.
-- Nearly identical ridge/PCR errors suggest the dominant limitation is the
-  **linear input-to-output mapping** rather than overfitting in this setting.
-  The PCA projection floor is below total PCR prediction error, consistent
-  with a gap that improved linear fitting alone may not close.
-- Validation error decreases noticeably up to 200 functions but levels off
-  between 400 and 800. DeepONet will test whether a nonlinear operator
-  approximation can reduce this apparent error floor.
-- At N=800, all five subset seeds contain the same complete training pool.
-  Their near-zero SD is a design consequence, **not** evidence of zero
-  uncertainty. At smaller N the SD measures sensitivity to subsampling
-  this fixed pool, not variation across independently simulated datasets.
-- Model selection and reported performance both use the validation set; scores
-  are exploratory and can be optimistic. Only the planned final evaluation
-  on untouched test functions can support generalization claims.
-- No DeepONet was trained in this checkpoint; that is the next comparison.
+    # One error per held-out validation function.
+    errors = relative_l2_per_function(predictions, Y_valid)
+    score = float(errors.mean())
 
-## Next steps
-1. Share the data format and training/validation splits with Sudarshan.
-2. Train DeepONet on the same five nested subset sizes and evaluate on validation.
-3. Freeze architectures, PCA ranks, penalties, and other tuning decisions.
-4. Evaluate all frozen models on the locked test functions once, near Nov 30.
-5. Compute paired function-level bootstrap intervals on *test* differences.
-"""
-    (RESULTS_DIR / "baseline_checkpoint.md").write_text(report)
-    print(f"Baseline analysis completed in {seconds:.1f} s.")
-    return summary
+    # Bootstrap entire functions for a 95% confidence interval.
+    rng = np.random.default_rng(4020)
+    bootstrap_means = rng.choice(
+        errors, size=(10000, len(errors)), replace=True
+    ).mean(axis=1)
+    lower, upper = np.percentile(bootstrap_means, [2.5, 97.5])
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(results).to_csv(
+        RESULTS_DIR / "pcr_cv_results.csv", index=False
+    )
+
+    report = {
+        **best,
+        "validation_mean_relative_l2": score,
+        "bootstrap_95_ci": [float(lower), float(upper)],
+        "n_validation": len(errors),
+        "seed": 4020,
+    }
+    (RESULTS_DIR / "pcr_checkpoint_result.json").write_text(
+        json.dumps(report, indent=2)
+    )
+
+    print(json.dumps(report, indent=2))
+    return report
+
+ 
 
 
 def main() -> None:
