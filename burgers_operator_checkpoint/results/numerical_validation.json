@@ -1,0 +1,17 @@
+{
+  "sample_size": 24,
+  "solver_steps": {
+    "128": 164,
+    "256": 656,
+    "512": 2622
+  },
+  "relative_l2_128_vs_256": {
+    "median": 0.010087270579037706,
+    "maximum": 0.01733847819899405
+  },
+  "relative_l2_256_vs_512": {
+    "median": 0.004738343016347485,
+    "maximum": 0.009182206125548478
+  },
+  "fraction_with_lower_refinement_error": 1.0
+}

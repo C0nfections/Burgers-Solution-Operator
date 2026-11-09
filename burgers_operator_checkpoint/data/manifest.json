@@ -1,0 +1,52 @@
+{
+  "pde": "u_t+(u^2/2)_x=nu*u_xx, periodic x in [0,1)",
+  "config": {
+    "n_pairs": 1200,
+    "n_train": 800,
+    "n_validation": 200,
+    "n_test": 200,
+    "n_solver": 256,
+    "n_sensors": 64,
+    "viscosity": 0.01,
+    "final_time": 0.25,
+    "n_fourier_modes": 5,
+    "amplitude": 0.25,
+    "seed": 4020,
+    "cfl": 0.25
+  },
+  "shapes": {
+    "train": [
+      800,
+      64
+    ],
+    "validation": [
+      200,
+      64
+    ],
+    "test_locked": [
+      200,
+      64
+    ]
+  },
+  "simulator_steps": 656,
+  "maximum_absolute_mass_change": 1.1102230246251565e-16,
+  "number_of_energy_increases": 0,
+  "numerical_convergence": {
+    "sample_size": 24,
+    "solver_steps": {
+      "128": 164,
+      "256": 656,
+      "512": 2622
+    },
+    "relative_l2_128_vs_256": {
+      "median": 0.010087270579037706,
+      "maximum": 0.01733847819899405
+    },
+    "relative_l2_256_vs_512": {
+      "median": 0.004738343016347485,
+      "maximum": 0.009182206125548478
+    },
+    "fraction_with_lower_refinement_error": 1.0
+  },
+  "test_policy": "test_locked.npz must not be loaded during model selection"
+}
