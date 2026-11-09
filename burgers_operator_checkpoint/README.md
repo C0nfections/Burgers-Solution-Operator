@@ -90,14 +90,5 @@ Load an NPZ file with
    generalizes better. A negative result (PCR performs as well or better) is
    still scientifically useful.
 
-## Handoff
-
-- **Leo:** finish validating the simulator, interpret PCR/ridge-PCR learning
-  curves, and explain the finite-volume and PCA steps.
-- **Sudarshan:** train DeepONet against these same function splits and nested
-  training subsets, record validation curves and training cost.
-- **Both:** compare models fairly, freeze model selection, perform one locked
-  test evaluation later, write the paper, and create the five-minute video.
-
 The full numerical implementation is in `operator_baselines.py`, organized
 into solver, data generation, PCA regression, and plotting functions.
