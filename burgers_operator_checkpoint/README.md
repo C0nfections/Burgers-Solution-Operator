@@ -1,6 +1,6 @@
 # ESE 4020 Topic 12 - Burgers Solution Operator Baseline Checkpoint
 
-This is a reproducible starting point for Leo and Sudarshan's Topic 12 project.
+This is a reproducible starting point the project.
 It generates an independent-function dataset for the 1-D viscous Burgers PDE,
 validates the numerical solver, and tunes principal component regression (PCR)
 and ridge-regularized PCR on **validation data only**.
